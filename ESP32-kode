@@ -1,0 +1,124 @@
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  //prints when you are connected to wifi
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+//creating a function to retreive information from MQTT-topics already subscribed to
+void callback(char* topic, byte* message, unsigned int length) {
+  //creating Strings for the messages
+  String emergencyReturn;
+  // creating buffer to save JSON-string
+  char jsonBuffer[length + 1];
+
+  for (int i = 0; i < length; i++) {  //goes through the message character for character
+    Serial.print((char)message[i]);   //printing the retreived message
+    //adding the message to the Strings
+    emergencyReturn += (char)message[i];
+    //adding the massage to buffer
+    jsonBuffer[i] = (char)message[i];
+  }
+  jsonBuffer[length] = '\0';  // Null-terminerer strengen
+
+  // Deserialiser JSON-strengen
+  const size_t capacity = JSON_OBJECT_SIZE(1) + 20;
+  DynamicJsonDocument doc(capacity);
+  DeserializationError error = deserializeJson(doc, jsonBuffer);
+
+  // Retrieving the value from "face"
+  const char* faceValue = doc["face"];
+
+  // Check if the message came from the topic "ESP32/button_pressed"
+  if (String(topic) == "ESP32/emergency_return") {
+    //if the message tells us that switch1 is pressed, the string Switch gets the value switch1
+    if (emergencyReturn == "emergency return") {
+      //code to return the drone
+    }
+  }
+  if (strcmp(faceValue, "face detected") == 0) {
+    Serial.println("Face detected!");
+    face = "detected";
+  }
+}
+
+//changing heat_detection to true if motion and heat is detected
+void IRAM_ATTR detectsHeat() {
+  heat_detection = true;
+}
+
+void setup() {
+  Serial.begin(115200);                     //setting baud rate
+  survivalkitservo.attach(survivalkitPin);  //setting doorservo to correct pin
+  setup_wifi();                             //calling function to set up WiFi
+
+  // Connect to MQTT broker
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+
+  //setting pins to input or output
+  pinMode(heatSensor, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(heatSensor), detectsHeat, RISING);
+}
+
+//creating function to connect to MQTT
+void reconnect() {
+  // if not connected to MQTT-broker, this will loop until connected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect("ESP8266Client")) {
+      Serial.println("connected");
+      // Subscribe to wanted topics
+      client.subscribe("ESP32/face");
+      client.subscribe("ESP32/emergencyreturn");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+    }
+    while (!reconnectTimer.isFinished(5000)) {
+      //waiting for 5 seconds to pass
+    }
+    reconnectTimer.reset();
+  }
+}
+
+
+void survivalkit() {
+  //checking if both face and heat+motion is detected
+  if (face == "detected" && heat_detection == true) {
+    //servo moves 90 degrees
+    survivalkitservo.write(90);
+    //Creating and publishing JSON string to MQTT
+    String human_found = "{\"human\": \"human found!\"}";
+    client.publish("ESP32/human", human_found.c_str());
+    //waiting 5 seconds before changing servo back to 0 degrees, and changing face and heat_detection back to values when neither is detected
+    if (survivalkittimer.isFinished(5000)) {
+      survivalkitservo.write(0);
+      face = "not detected";
+      heat_detection = false;
+      survivalkittimer.reset();
+    }
+  }
+}
+
+void emergencyreturn() {
+  //enter code for BMP280 to discover dangerous weathersituation
+}
+
+
+
+void loop() {
+  //reconnects if not connected to MQTT-broker
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();      //loops the client
+  survivalkit();      //calling function for the survivalkit-drop
+  emergencyreturn();  //calling function for emergencydrop
+}
