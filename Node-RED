@@ -1,0 +1,289 @@
+[
+    {
+        "id": "960862d150d433e6",
+        "type": "ui_text",
+        "z": "b820228595104113",
+        "group": "e2ced36eee8a6288",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "Human found",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 760,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "a4a3e7d4037d28f0",
+        "type": "mqtt in",
+        "z": "b820228595104113",
+        "name": "",
+        "topic": "ESP32/human",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "9b295db82616e7fb",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 250,
+        "y": 60,
+        "wires": [
+            [
+                "1964ecfea531bdde",
+                "75c9e1958f70de3c",
+                "960862d150d433e6"
+            ]
+        ]
+    },
+    {
+        "id": "878bcca389cc7e7b",
+        "type": "ui_button",
+        "z": "b820228595104113",
+        "name": "",
+        "group": "e4ca5a7b746510c3",
+        "order": 3,
+        "width": 0,
+        "height": 0,
+        "passthru": false,
+        "label": "Return button",
+        "tooltip": "",
+        "color": "",
+        "bgcolor": "",
+        "icon": "",
+        "payload": "Drone returning to base",
+        "payloadType": "str",
+        "topic": "topic",
+        "topicType": "msg",
+        "x": 220,
+        "y": 220,
+        "wires": [
+            [
+                "7c2fcc78cd37023e"
+            ]
+        ]
+    },
+    {
+        "id": "cd53a5751814e57d",
+        "type": "ui_text",
+        "z": "b820228595104113",
+        "group": "e4ca5a7b746510c3",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "x": 470,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "0e49598ec0dfbea6",
+        "type": "mqtt in",
+        "z": "b820228595104113",
+        "name": "",
+        "topic": "ESP32/emergencyreturn",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "9b295db82616e7fb",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 250,
+        "y": 280,
+        "wires": [
+            [
+                "cd53a5751814e57d"
+            ]
+        ]
+    },
+    {
+        "id": "7c2fcc78cd37023e",
+        "type": "mqtt out",
+        "z": "b820228595104113",
+        "name": "",
+        "topic": "ESP32/emergencyreturn",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "9b295db82616e7fb",
+        "x": 470,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "1964ecfea531bdde",
+        "type": "change",
+        "z": "b820228595104113",
+        "name": "retreiving human-message",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.human",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 500,
+        "y": 60,
+        "wires": [
+            [
+                "960862d150d433e6"
+            ]
+        ]
+    },
+    {
+        "id": "75c9e1958f70de3c",
+        "type": "change",
+        "z": "b820228595104113",
+        "name": "Empty string",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 430,
+        "y": 140,
+        "wires": [
+            [
+                "7cd7a076aad6da58"
+            ]
+        ]
+    },
+    {
+        "id": "7cd7a076aad6da58",
+        "type": "delay",
+        "z": "b820228595104113",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "10",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 580,
+        "y": 140,
+        "wires": [
+            [
+                "960862d150d433e6"
+            ]
+        ]
+    },
+    {
+        "id": "bfc7564f9c20d60e",
+        "type": "ui_template",
+        "z": "b820228595104113",
+        "group": "787fd39958f29305",
+        "name": "livestream",
+        "order": 1,
+        "width": 7,
+        "height": 3,
+        "format": "<div style=\"margin-bottom: 10px;\">\n    <img src=\"192.168.137.75\" width=\"650px\">\n</div>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "x": 210,
+        "y": 380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e2ced36eee8a6288",
+        "type": "ui_group",
+        "name": "Detection",
+        "tab": "eff96e5cd3bc3661",
+        "order": 1,
+        "disp": true,
+        "width": 7,
+        "collapse": false
+    },
+    {
+        "id": "9b295db82616e7fb",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "192.168.137.108",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "e4ca5a7b746510c3",
+        "type": "ui_group",
+        "name": "Emergency return",
+        "tab": "eff96e5cd3bc3661",
+        "order": 2,
+        "disp": true,
+        "width": 7,
+        "collapse": false
+    },
+    {
+        "id": "787fd39958f29305",
+        "type": "ui_group",
+        "name": "livestream",
+        "tab": "eff96e5cd3bc3661",
+        "order": 3,
+        "disp": true,
+        "width": 7,
+        "collapse": false
+    },
+    {
+        "id": "eff96e5cd3bc3661",
+        "type": "ui_tab",
+        "name": "tiny bæbu",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    }
+]
