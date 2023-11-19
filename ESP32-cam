@@ -1,0 +1,246 @@
+// Include libraries
+#include <Arduino.h>           // Arduino core library
+#include "camera_pins.h"       // Camera pin definitions
+#include "esp_camera.h"        // ESP32 camera library
+#include <WiFi.h>              // WiFi library
+#include "img_converters.h"    // Image converters library
+#include "fb_gfx.h"            // Graphics library for frame buffer
+#include "soc/soc.h"           // System-on-Chip library to disable brownout problems
+#include "soc/rtc_cntl_reg.h"  // RTC control register library to disable brownout problems
+#include "esp_http_server.h"   // ESP32 HTTP server library
+#include <PubSubClient.h>      // MQTT library
+
+// Creating a Struct to replace delay with millis
+struct Timer {
+  unsigned long startTime;  // Start time
+
+  void reset() {
+    startTime = millis();  // Redefine start time as the current time when reset.
+  }
+  unsigned long getElapsedTime() {
+    return millis() - startTime;  // Returns time passed since the last reset.
+  }
+  bool isFinished(unsigned long duration) {  // Enter milliseconds for the duration for each timer
+    return getElapsedTime() >= duration;     // Checks if the time passed is larger than the wanted duration.
+  }
+};
+
+// Network and MQTT credentials
+const char *ssid = "Noras internett";
+const char *password = "internettpassord";
+const char *mqtt_server = "192.168.137.108";
+
+// Creating MQTT client named "client"
+WiFiClient espClient;
+PubSubClient client(espClient);
+Timer reconnectTimer;  // Creating timers
+int FaceDetected;      // Defining face detected
+
+#define PART_BOUNDARY "123456789000000000000987654321"  // Define a boundary for separating parts in the multipart stream
+
+// Stream content type for camera streaming
+static const char *_STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;  // Define the content type for the camera stream
+static const char *_STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";                            // Define the boundary between different parts of the stream
+static const char *_STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";     // Define the format for each part of the stream
+
+httpd_handle_t stream_httpd = NULL;  // HTTP server handle for camera streaming
+
+// HTTP request handler for camera streaming
+static esp_err_t stream_handler(httpd_req_t *req) {
+  camera_fb_t *fb = NULL;    // Camera frame buffer
+  esp_err_t res = ESP_OK;    // Error variable
+  size_t _jpg_buf_len = 0;   // Length of the JPEG buffer
+  uint8_t *_jpg_buf = NULL;  // JPEG buffer
+  char *part_buf[64];        // Buffer for each part of the stream
+
+  res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);  // Set the content type for the HTTP response
+  if (res != ESP_OK) {
+    return res;  // Return if setting content type fails
+  }
+
+  // Infinite loop for camera streaming
+  while (true) {
+    // Capture a frame from the camera
+    fb = esp_camera_fb_get();
+    if (!fb) {
+      // If capture fails, print an error message and set the result to failure
+      Serial.println("Camera capture failed");
+      res = ESP_FAIL;
+    } else {
+      // If the captured frame width is greater than 400 pixels
+      if (fb->width > 400) {
+        // If the format is not JPEG, convert the frame to JPEG format
+        if (fb->format != PIXFORMAT_JPEG) {
+          // Attempt JPEG conversion with specified quality
+          bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+          esp_camera_fb_return(fb);
+          fb = NULL;
+          // If JPEG conversion fails, print an error message and set the result to failure
+          if (!jpeg_converted) {
+            Serial.println("JPEG compression failed");
+            res = ESP_FAIL;
+          }
+        } else {
+          // If the format is already JPEG, use the existing buffer and length
+          _jpg_buf_len = fb->len;
+          _jpg_buf = fb->buf;
+        }
+      }
+    }
+    // If the result is still okay, send the HTTP response chunks
+    if (res == ESP_OK) {
+      // Calculate and send the header for the current JPEG part
+      size_t hlen = snprintf((char *)part_buf, 64, _STREAM_PART, _jpg_buf_len);
+      res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
+    }
+    if (res == ESP_OK) {
+      // Send the JPEG data as a chunk
+      res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
+    }
+    if (res == ESP_OK) {
+      // Send the stream boundary as a chunk
+      res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
+    }
+    // Release resources depending on the state
+    if (fb) {
+      esp_camera_fb_return(fb);
+      fb = NULL;
+      _jpg_buf = NULL;
+    } else if (_jpg_buf) {
+      free(_jpg_buf);
+      _jpg_buf = NULL;
+    }
+    // If the result is not okay, exit the loop
+    if (res != ESP_OK) {
+      break;
+    }
+  }
+  // Return the final result of the HTTP response
+  return res;
+}
+
+// Function to start the camera streaming server
+void startCameraServer() {
+  // Configure HTTP server with default settings
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.server_port = 80;
+
+  // Define the URI handler for the root path '/'
+  httpd_uri_t index_uri = {
+    .uri = "/",
+    .method = HTTP_GET,
+    .handler = stream_handler,
+    .user_ctx = NULL
+  };
+
+  // Start the HTTP server and register the URI handler
+  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
+    httpd_register_uri_handler(stream_httpd, &index_uri);
+  }
+}
+
+// Setup function
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // Disable brownout detector
+
+  Serial.begin(115200);                 // Initialize the serial communication at 115200 baud
+  client.setServer(mqtt_server, 1883);  // Set the MQTT server and port for the MQTT client
+  Serial.setDebugOutput(false);         // Disable serial debug output
+
+  camera_config_t config;                // Camera pins configuration on ESP32
+  config.ledc_channel = LEDC_CHANNEL_0;  // LEDC channel for controlling the camera LED
+  config.ledc_timer = LEDC_TIMER_0;      // LEDC timer for controlling the camera LED
+  config.pin_d0 = Y2_GPIO_NUM;           // GPIO pin for camera D0
+  config.pin_d1 = Y3_GPIO_NUM;           // GPIO pin for camera D1
+  config.pin_d2 = Y4_GPIO_NUM;           // GPIO pin for camera D2
+  config.pin_d3 = Y5_GPIO_NUM;           // GPIO pin for camera D3
+  config.pin_d4 = Y6_GPIO_NUM;           // GPIO pin for camera D4
+  config.pin_d5 = Y7_GPIO_NUM;           // GPIO pin for camera D5
+  config.pin_d6 = Y8_GPIO_NUM;           // GPIO pin for camera D6
+  config.pin_d7 = Y9_GPIO_NUM;           // GPIO pin for camera D7
+  config.pin_xclk = XCLK_GPIO_NUM;       // GPIO pin for external clock input
+  config.pin_pclk = PCLK_GPIO_NUM;       // GPIO pin for pixel clock input
+  config.pin_vsync = VSYNC_GPIO_NUM;     // GPIO pin for vertical synchronization
+  config.pin_href = HREF_GPIO_NUM;       // GPIO pin for horizontal synchronization
+  config.pin_sscb_sda = SIOD_GPIO_NUM;   // GPIO pin for SCCB serial data line
+  config.pin_sscb_scl = SIOC_GPIO_NUM;   // GPIO pin for SCCB serial clock line
+  config.pin_pwdn = PWDN_GPIO_NUM;       // GPIO pin for power-down control
+  config.pin_reset = RESET_GPIO_NUM;     // GPIO pin for camera reset
+  config.xclk_freq_hz = 20000000;        // Configure xclk frequency to 20,000,000 Hz
+  config.pixel_format = PIXFORMAT_JPEG;  // Set the pixel format to JPEG
+
+  // Configure camera parameters based on the available PSRAM
+  if (psramFound()) {
+    config.frame_size = FRAMESIZE_VGA;  // Set frame size to VGA for PSRAM found
+    config.jpeg_quality = 10;           // Set JPEG quality to 10 for PSRAM found
+    config.fb_count = 2;                // Set frame buffer count to 2 for PSRAM found
+  } else {
+    config.frame_size = FRAMESIZE_SVGA;  // Set frame size to SVGA for no PSRAM
+    config.jpeg_quality = 12;            // Set JPEG quality to 12 for no PSRAM
+    config.fb_count = 1;                 // Set frame buffer count to 1 for no PSRAM
+  }
+
+  // Initialize the camera with the configured parameters
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed with error 0x%x", err);  // Print error message if camera initialization fails
+    return;
+  }
+
+  // Wi-Fi connection
+  WiFi.begin(ssid, password);  // Start connecting to Wi-Fi using provided credentials
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);  // Wait for Wi-Fi connection
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");  // Print message when Wi-Fi is connected
+
+  Serial.print("Camera Stream Ready! Go to: http://");  // Print message about the camera stream URL
+  Serial.print(WiFi.localIP());                         // Print the local IP address
+
+  startCameraServer();  // Start the camera streaming server
+}
+
+
+// Function to reconnect to MQTT
+void reconnect() {
+  // If not connected to the MQTT broker, this will loop until connected
+  while (!client.connected()) {
+    Serial.print("\nAttempting MQTT connection...");  // Print message indicating attempt to connect
+    // Attempt to connect
+    if (client.connect("ESP8266Client")) {
+      Serial.println("\nconnected");  // Print message indicating successful connection
+
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());  // Print the connection state
+      Serial.println(" try again in 5 seconds");
+      while (!reconnectTimer.isFinished(5000)) {
+        // Wait for 5 seconds before attempting to reconnect
+      }
+    }
+  }
+}
+
+// Function for facial detection
+void facial_detection() {
+  if (faceTimer.isFinished(5000)) {
+    FaceDetected = random(2);  // Generate a random value (0 or 1) for face detection
+    if (FaceDetected == 1) {
+      String face_detected = "{\"face\": \"face detected\"}";
+      client.publish("ESP32/face", face_detected.c_str());  // Publish face detection message to MQTT topic
+    }
+    faceTimer.reset();  // Reset the timer for the next facial detection
+  }
+}
+
+// Main loop
+void loop() {
+  // Reconnect to MQTT broker if not connected
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();       // Loop the MQTT client for handling messages
+  facial_detection();  // Perform facial detection
+}
